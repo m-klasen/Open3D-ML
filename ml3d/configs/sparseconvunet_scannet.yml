@@ -12,10 +12,10 @@ model:
   batcher: ConcatBatcher
   ckpt_path: # path/to/your/checkpoint
   m: 16
-  scale: 20
+  voxel_size: 0.05
   in_channels: 3
   num_classes: 20
-  ignored_label_inds: [-1]
+  ignored_label_inds: [-100]
   augment:
     rotate:
       method: vertical

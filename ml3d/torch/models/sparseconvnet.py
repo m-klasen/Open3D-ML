@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import pdb
+import math
 
 from .base_model import BaseModel
 from ...utils import MODEL
@@ -80,13 +82,30 @@ class SparseConvUnet(BaseModel):
                 "SparseConvnet doesn't work without feature values.")
 
         feat = np.array(data['feat'], dtype=np.float32)
-
-        # Scale to voxel size.
-        points *= 1. / self.cfg.voxel_size  # Scale = 1/voxel_size
+        scale = 1. / self.cfg.voxel_size
 
         if attr['split'] in ['training', 'train']:
-            points, feat, labels = self.augment.augment(
-                points, feat, labels, self.cfg.get('augment', None))
+            m = np.eye(3) + np.random.randn(3, 3) * 0.1
+            m[0][0] *= np.random.randint(0, 2) * 2 - 1
+            m *= scale
+            theta = np.random.rand() * 2 * math.pi
+            m = np.matmul(
+                m, [[math.cos(theta), math.sin(theta), 0],
+                    [-math.sin(theta), math.cos(theta), 0], [0, 0, 1]])
+            points = np.matmul(points, m)
+
+            feat = feat + np.random.normal(0, 1, 3) * 0.1
+
+        else:
+            m = np.eye(3)
+            m[0][0] *= np.random.randint(0, 2) * 2 - 1
+            m *= scale
+            theta = np.random.rand() * 2 * math.pi
+            m = np.matmul(
+                m, [[math.cos(theta), math.sin(theta), 0],
+                    [-math.sin(theta), math.cos(theta), 0], [0, 0, 1]])
+            points = np.matmul(points, m) + 4096 / 2 + np.random.uniform(
+                -2, 2, 3)
 
         m = points.min(0)
         M = points.max(0)
@@ -398,17 +417,24 @@ class ResidualBlock(nn.Module):
     def forward(self, feat, pos):
         out1 = self.lin(feat)
 
-        if feat.shape[0] == 1:
-            feat *= 0
+        if feat.shape[0] < 3:
+            feat = ((feat - self.bn1.running_mean) /
+                    torch.sqrt(self.bn1.running_var +
+                               self.bn1.eps)) * self.bn1.weight + self.bn1.bias
         else:
-            feat = self.relu1(self.bn1(feat))
+            feat = self.bn1(feat)
+
+        feat = self.relu1(feat)
 
         feat = self.scn1(feat, pos)
 
-        if feat.shape[0] == 1:
-            feat *= 0
+        if feat.shape[0] < 3:
+            feat = ((feat - self.bn2.running_mean) /
+                    torch.sqrt(self.bn2.running_var +
+                               self.bn2.eps)) * self.bn2.weight + self.bn2.bias
         else:
-            feat = self.relu2(self.bn2(feat))
+            feat = self.bn2(feat)
+        feat = self.relu2(feat)
 
         out2 = self.scn2(feat, pos)
 
@@ -478,8 +504,11 @@ class UNet(nn.Module):
         concat_feat = []
         for module in self.net:
             if isinstance(module, nn.BatchNorm1d):
-                if feat.shape[0] == 1:
-                    feat *= 0  # Cannot calculate std_dev for 1 dimension.
+                if feat.shape[0] < 3:
+                    # Cannot calculate std_dev for dimension 1, using running statistics.
+                    feat = ((feat - module.running_mean) /
+                            torch.sqrt(module.running_var + module.eps)
+                           ) * module.weight + module.bias
                 else:
                     feat = module(feat)
             elif isinstance(module, nn.LeakyReLU):
