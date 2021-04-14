@@ -4,6 +4,7 @@ import numpy as np
 import logging
 import sys
 import warnings
+import time
 
 from datetime import datetime
 from tqdm import tqdm
@@ -352,7 +353,9 @@ class SemanticSegmentation(BasePipeline):
             #   sampler=get_sampler(train_sampler),
             num_workers=cfg.get('num_workers', 4),
             pin_memory=cfg.get('pin_memory', True),
-            collate_fn=self.batcher.collate_fn)
+            shuffle=True,
+            collate_fn=self.batcher.collate_fn,
+            worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
 
         valid_dataset = dataset.get_split('validation')
         # valid_sampler = valid_dataset.sampler
@@ -369,7 +372,9 @@ class SemanticSegmentation(BasePipeline):
             #   sampler=get_sampler(valid_sampler),
             num_workers=cfg.get('num_workers', 4),
             pin_memory=cfg.get('pin_memory', True),
-            collate_fn=self.batcher.collate_fn)
+            shuffle=True,
+            collate_fn=self.batcher.collate_fn,
+            worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
 
         self.optimizer, self.scheduler = model.get_optimizer(cfg)
 
