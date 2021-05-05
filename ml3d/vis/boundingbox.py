@@ -87,7 +87,7 @@ class BoundingBox3D:
             provided, a color of 50% grey will be used. (optional)
         """
         nverts = 14
-        nlines = 17
+        nlines = 12
         points = np.zeros((nverts * len(boxes), 3), dtype="float32")
         indices = np.zeros((nlines * len(boxes), 2), dtype="int32")
         colors = np.zeros((nlines * len(boxes), 3), dtype="float32")
@@ -98,9 +98,6 @@ class BoundingBox3D:
             x = 0.5 * box.size[0] * box.left
             y = 0.5 * box.size[1] * box.up
             z = 0.5 * box.size[2] * box.front
-            arrow_tip = box.center + z + box.arrow_length * box.front
-            arrow_mid = box.center + z + 0.60 * box.arrow_length * box.front
-            head_length = 0.3 * box.arrow_length
             # It seems to be substantially faster to assign directly for the
             # points, as opposed to points[pidx:pidx+nverts] = np.stack((...))
             points[pidx] = box.center + x + y + z
@@ -112,11 +109,6 @@ class BoundingBox3D:
             points[pidx + 6] = box.center - x - y - z
             points[pidx + 7] = box.center + x - y - z
             points[pidx + 8] = box.center + z
-            points[pidx + 9] = arrow_tip
-            points[pidx + 10] = arrow_mid + head_length * box.up
-            points[pidx + 11] = arrow_mid - head_length * box.up
-            points[pidx + 12] = arrow_mid + head_length * box.left
-            points[pidx + 13] = arrow_mid - head_length * box.left
 
         # It is faster to break the indices and colors into their own loop.
         for i in range(0, len(boxes)):
@@ -129,17 +121,14 @@ class BoundingBox3D:
                                (pidx + 4, pidx + 5), (pidx + 5, pidx + 6),
                                (pidx + 6, pidx + 7), (pidx + 7, pidx + 4),
                                (pidx + 0, pidx + 4), (pidx + 1, pidx + 5),
-                               (pidx + 2, pidx + 6), (pidx + 3, pidx + 7),
-                               (pidx + 8, pidx + 9), (pidx + 9, pidx + 10),
-                               (pidx + 9, pidx + 11), (pidx + 9,
-                                                       pidx + 12), (pidx + 9,
-                                                                    pidx + 13))
+                               (pidx + 2, pidx + 6), (pidx + 3, pidx + 7)
+                               )
 
             if lut is not None:
                 label = lut.labels[box.label_class]
                 c = (label.color[0], label.color[1], label.color[2])
             else:
-                c = (0.5, 0.5, 0.5)
+                c = (1., 0., 0.)
 
             colors[idx:idx +
                    nlines] = c  # copies c to each element in the range
@@ -150,3 +139,7 @@ class BoundingBox3D:
         lines.colors = o3d.utility.Vector3dVector(colors)
 
         return lines
+
+    @staticmethod
+    def parse_o3d_boxes(boxes):
+        return boxes

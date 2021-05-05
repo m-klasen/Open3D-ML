@@ -15,6 +15,8 @@ import time
 class Model:
     """The class that helps build visualization models based on attributes, data, and methods."""
     bounding_box_prefix = "Bounding Boxes/"
+    track_prefix = "Tracks/"
+    box_preds_prefix = "Predictions/"
 
     class BoundingBoxData:
         """The class to define a bounding box that is used to describe the target location.
@@ -23,9 +25,12 @@ class Model:
                 boxes: The array of pointcloud that define the bounding box.
         """
 
-        def __init__(self, name, boxes):
+        def __init__(self, name, boxes, tracks=None, box_preds=None):
             self.name = name
             self.boxes = boxes
+            
+            self.tracks = tracks
+            self.box_preds = box_preds
 
     def __init__(self):
         # Note: the tpointcloud cannot store the actual data arrays, because
@@ -213,7 +218,7 @@ class DataModel(Model):
     """The class for data i/o and storage of visualization.
     **Args:**
         userdata: The dataset to be used in the visualization.
-"""
+    """
 
     def __init__(self, userdata):
         super().__init__()
@@ -247,7 +252,7 @@ class DatasetModel(Model):
         dataset:  The 3D ML dataset to use. You can use the base dataset, sample datasets , or a custom dataset.
         split: A string identifying the dataset split that is usually one of 'training', 'test', 'validation', or 'all'.
         indices: The indices to be used for the datamodel. This may vary based on the split used.
-"""
+    """
 
     def __init__(self, dataset, split, indices):
         super().__init__()
@@ -322,7 +327,7 @@ class DatasetModel(Model):
 
         if 'bounding_boxes' in data:
             self.bounding_box_data.append(
-                Model.BoundingBoxData(name, data['bounding_boxes']))
+                Model.BoundingBoxData(name, data['bounding_boxes'], data['tracks'],  data['flow_centers']))
 
         self.create_point_cloud(data)
         size = self._calc_pointcloud_size(self._data[name], self.tclouds[name])
@@ -831,7 +836,15 @@ class Visualizer:
         v.add_child(h)
 
         self._panel.add_child(model)
+        # Tracking
+        track_ui = gui.CollapsableVert("Tracks", 0, indented_margins)
 
+        grid = gui.VGrid(2)
+        grid.add_child(gui.Label("Range (min):"))
+        grid.add_child(gui.Label("Test"))
+        track_ui.add_child(grid)
+        track_ui.add_fixed(0.5 * em)
+        self._panel.add_child(track_ui)
         # Coloring
         properties = gui.CollapsableVert("Properties", 0, indented_margins)
 
@@ -1147,29 +1160,88 @@ class Visualizer:
         mat.shader = "unlitLine"
         mat.line_width = 2 * self.window.scaling
 
+        track_mat = rendering.Material()
+        track_mat.shader = "unlitLine"
+        track_mat.line_width = 5 * self.window.scaling
+
         if self._consolidate_bounding_boxes:
             name = Model.bounding_box_prefix.split("/")[0]
-            boxes = []
+            track_name = Model.track_prefix.split("/")[0]
+            preds_name = Model.box_preds_prefix.split("/")[0]
+            boxes,tracks, box_preds = [],[],[]
             # When consolidated we assume bbox_data.name is the geometry name.
             if animation_frame is None:
                 for bbox_data in self._objects.bounding_box_data:
                     if bbox_data.name in self._name2treenode and self._name2treenode[
                             bbox_data.name].checkbox.checked:
                         boxes += bbox_data.boxes
+                        box_preds += bbox_data.box_preds
+                        tracks.append(bbox_data.tracks)
             else:
                 geom_name = self._animation_frames[animation_frame]
                 for bbox_data in self._objects.bounding_box_data:
                     if bbox_data.name == geom_name:
                         boxes = bbox_data.boxes
+                        box_preds = bbox_data.box_preds
+                        tracks = [bbox_data.tracks]
                         break
-
+            
             self._3d.scene.remove_geometry(name)
+            self._3d.scene.remove_geometry(track_name)
+            #self._3d.scene.remove_geometry(preds_name)
+            Colors = [[0., 0., 0.], [0.96078431, 0.58823529, 0.39215686],
+                    [0.96078431, 0.90196078, 0.39215686],
+                    [0.58823529, 0.23529412, 0.11764706],
+                    [0.70588235, 0.11764706, 0.31372549], [1., 0., 0.],
+                    [0.11764706, 0.11764706, 1.], [0.78431373, 0.15686275, 1.],
+                    [0.35294118, 0.11764706, 0.58823529], [1., 0., 1.],
+                    [1., 0.58823529, 1.], [0.29411765, 0., 0.29411765],
+                    [0.29411765, 0., 0.68627451], [0., 0.78431373, 1.],
+                    [0.19607843, 0.47058824, 1.], [0., 0.68627451, 0.],
+                    [0., 0.23529412, 0.52941176], [0.31372549, 0.94117647, 0.58823529],
+                    [0.58823529, 0.94117647, 1.], [0., 0., 1.], [1.0, 1.0, 0.25],
+                    [0.5, 1.0, 0.25], [0.25, 1.0, 0.25], [0.25, 1.0, 0.5],
+                    [0.25, 1.0, 1.25], [0.25, 0.5, 1.25], [0.25, 0.25, 1.0],
+                    [0.125, 0.125, 0.125], [0.25, 0.25, 0.25], [0.375, 0.375, 0.375],
+                    [0.5, 0.5, 0.5], [0.625, 0.625, 0.625], [0.75, 0.75, 0.75],
+                    [0.875, 0.875, 0.875]]
             if len(boxes) > 0:
                 lines = BoundingBox3D.create_lines(boxes, lut)
+                pred_lines = BoundingBox3D.create_lines(box_preds, lut)
                 self._3d.scene.add_geometry(name, lines, mat)
+                #self._3d.scene.add_geometry(preds_name, pred_lines, mat)
+                if np.array(tracks[-1]).shape[0]>=2:
+                    last_frame_tracks = np.array(tracks[-1])[-1]
+                    points, indices, colors = [],[],[]
+                    tot_idx = 0
+                    for i,track in enumerate(last_frame_tracks):
+                        idx = np.where((track[:,0] != -1) & (track[:,1] != -1) & (track[:,2] != -1))[0]
+                        if (track[-1]!=[-1,-1,-1]).all() and len(idx)>2:
+
+                            #print(idx)
+                            curr_track = track[idx]
+                            points.append(curr_track)
+                            for ii in range(len(curr_track)):
+                                if ii==len(curr_track)-1: pass #Ensure we do not connect when starting the new track
+                                else:    
+                                    indices.append([tot_idx,tot_idx+1])
+                                    label = Colors[i]
+                                    colors.append((label[0], label[1], label[2]))
+                                tot_idx+=1
+                            
+                    #print(np.asarray(points).shape)
+                    if points:
+                        #print(points,[len(p) for p in points],indices)
+                        track_lines = o3d.geometry.LineSet()
+                        track_lines.points = o3d.utility.Vector3dVector(np.concatenate(np.asarray(points),axis=0))
+                        track_lines.lines = o3d.utility.Vector2iVector(indices)
+                        track_lines.colors = o3d.utility.Vector3dVector(colors)
+                        self._3d.scene.add_geometry(track_name, track_lines, track_mat)
 
                 if name not in self._name2treenode:
                     self._add_tree_name(name, is_geometry=False)
+                if track_name not in self._name2treenode:
+                    self._add_tree_name(track_name, is_geometry=False)
             self._3d.force_redraw()
         else:
             # Don't run this more than once if we aren't consolidating,
@@ -1182,6 +1254,7 @@ class Visualizer:
             for bbox_data in self._objects.bounding_box_data:
                 lines = BoundingBox3D.create_lines(bbox_data.boxes, lut)
                 self._3d.scene.add_geometry(bbox_data.name, lines, mat)
+
 
             for bbox_data in self._objects.bounding_box_data:
                 self._add_tree_name(bbox_data.name, is_geometry=False)
@@ -1335,7 +1408,7 @@ class Visualizer:
 
     def _on_display_tab_changed(self, index):
         if index == 1:
-            self._animation_frames = self._get_selected_names()
+            self._animation_frames = self._objects.data_names
             self._slider.set_limits(0, len(self._animation_frames) - 1)
             self._on_animation_slider_changed(self._slider.int_value)
             # _on_animation_slider_changed() calls _update_bounding_boxes()
